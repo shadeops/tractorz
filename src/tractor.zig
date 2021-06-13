@@ -57,7 +57,7 @@ fn writeToArrayListCallback(data: *c_void, size: c_uint, nmemb: c_uint, user_dat
     return nmemb * size;
 }
 
-const ThreadContext = struct {
+pub const ThreadContext = struct {
     count: u32,
     is_ready: bool,
 };
@@ -71,7 +71,6 @@ fn appendNum(ctx: * ThreadContext) !void {
     const rand = &prng.random;
    
     while(true) {
-        std.time.sleep(1 * std.time.ns_per_s);
         var rand_val = rand.intRangeAtMost(u32, 1, 100);
        
         // barrier until is_ready is true
@@ -81,6 +80,8 @@ fn appendNum(ctx: * ThreadContext) !void {
 
         @atomicStore(u32, &ctx.count, rand_val, .SeqCst);
         @atomicStore(bool, &ctx.is_ready, true, .SeqCst);
+        
+        std.time.sleep(1 * std.time.ns_per_s);
     }
 }
 

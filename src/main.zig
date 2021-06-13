@@ -30,6 +30,65 @@ pub fn main() anyerror!void {
 
 }
 
+fn spawnNewObjects(space: *chip.cpSpace, rand: *std.rand.Random, ctx: *tractor.ThreadContext) u32 {
+
+    if (!@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
+        return 0;
+    }
+    
+    var count = @atomicRmw(u32, &ctx.count, .Xchg, 0, .SeqCst);
+    @atomicStore(bool, &ctx.is_ready, false, .SeqCst);
+
+    std.debug.print("{}\n", .{count});
+    
+    const radius: f64 = 2;
+    const mass: f64 = 1;
+    var moment = chip.cpMomentForCircle(mass, 0, radius, chip.cpvzero);
+
+    var i: usize = 0;
+    while (i < count) : (i+=1) {
+
+        var x_pos = @intToFloat(f64, rand.uintLessThan(u32, 800));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
+
+        var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
+        chip.cpBodySetPosition(body, chip.cpv(x_pos, 610+y_pos));
+    
+        var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
+        chip.cpShapeSetFriction(shape, 0.7);
+        chip.cpShapeSetElasticity(shape, 0.2);
+    }
+
+    return count;
+}
+
+fn cullShape(space: ?*chip.cpSpace, shape: ?* c_void, data: ?* c_void) callconv(.C) void {
+    chip.cpSpaceRemoveShape(space, @ptrCast(* chip.cpShape, shape));
+    chip.cpShapeFree(@ptrCast(* chip.cpShape, shape));
+}
+
+fn cullBody(space: ?*chip.cpSpace, body: ?* c_void, data: ?* c_void) callconv(.C) void {
+    chip.cpSpaceRemoveBody(space, @ptrCast(* chip.cpBody, body));
+    chip.cpBodyFree(@ptrCast(* chip.cpBody, body));
+}
+
+fn postCullShapeWrapper(body: ?*chip.cpBody, shape: ?* chip.cpShape, data: ?* c_void)  callconv(.C) void {
+    var space = chip.cpBodyGetSpace(body);
+    var success = chip.cpSpaceAddPostStepCallback(space, cullShape, shape, null);
+}
+
+fn drawShapes(body: ?* chip.cpBody, data: ?* c_void) callconv(.C) void {
+    var pos = chip.cpBodyGetPosition(body);
+    var space = chip.cpBodyGetSpace(body);
+    if ( pos.y < -10 ) {
+        chip.cpBodyEachShape(body, postCullShapeWrapper, null);
+        var success = chip.cpSpaceAddPostStepCallback(space, cullBody, body, null);
+    }
+
+    var tex: *ray.Texture = @ptrCast(* ray.Texture, @alignCast(4, data));
+    ray.DrawTexture(tex.*, @floatToInt(i32, pos.x), 600-@floatToInt(i32,pos.y), ray.RED);
+}
+
 fn vis() !void {
 
     ray.InitWindow(800, 600, "tractorz");
@@ -49,8 +108,9 @@ fn vis() !void {
 
     const gravity = chip.cpv(0, -100);
   
-    var space = chip.cpSpaceNew();
+    var space = chip.cpSpaceNew() orelse return;
     chip.cpSpaceSetGravity(space, gravity);
+    chip.cpSpaceSetDamping(space, 0.9);
  
     var ground = chip.cpSpaceGetStaticBody(space);
     var ground_shape_a = chip.cpSegmentShapeNew(ground, chip.cpv(-20, 300), chip.cpv(450, 100), 10);
@@ -63,67 +123,46 @@ fn vis() !void {
     _ = chip.cpSpaceAddShape(space, ground_shape_a);
     _ = chip.cpSpaceAddShape(space, ground_shape_b);
   
-    const radius: f64 = 2;
-    const mass: f64 = 1;
-  
-    var moment = chip.cpMomentForCircle(mass, 0, radius, chip.cpvzero);
- 
-    var balls: [100] *chip.cpBody = undefined;
-    var ball_shapes: [100] *chip.cpShape = undefined;
-    var inc: f32 = 10;
-
-    var i: usize = 0;
-    while (i < 100) : (i+=1) {
-        balls[i] = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
-        chip.cpBodySetPosition(balls[i], chip.cpv(@intToFloat(f32,i*8), 600));
+    const timeStep: f64 = 1.0/60.0;
     
-        var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(balls[i], radius, chip.cpvzero));
-        chip.cpShapeSetFriction(shape, 0.7);
-        chip.cpShapeSetElasticity(shape, 0.2);
-        ball_shapes[i] = shape orelse unreachable;
-    }
+    var ctx: tractor.ThreadContext = .{
+        .count = 0,
+        .is_ready = false,
+    };
+    var thread = try tractor.startListener(&ctx);
 
-    var ballBody = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment));
-    chip.cpBodySetPosition(ballBody, chip.cpv(300, 600));
-  
-    var ballShape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(ballBody, radius, chip.cpvzero));
-    chip.cpShapeSetFriction(ballShape, 0.7);
-    chip.cpShapeSetElasticity(ballShape, 1);
-    chip.cpSpaceSetDamping(space, 0.9);
+    _ = spawnNewObjects(space, rand, &ctx);
 
-    var timeStep: f64 = 1.0/60.0;
+    var i: u32 = 0;
 
-    var removed = false;
     while (!ray.WindowShouldClose()) {
-        var pos = chip.cpBodyGetPosition(ballBody);
+        
+        _ = spawnNewObjects(space, rand, &ctx);
 
+        chip.cpSpaceStep(space, timeStep);
+
+        chip.cpSpaceEachBody(space, drawShapes, &tex.texture); 
+        
         ray.BeginDrawing();
         ray.ClearBackground(ray.BLACK);
-
-        ray.DrawTexture(tex.texture, @floatToInt(i32, pos.x), 600-@floatToInt(i32,pos.y), ray.WHITE);
-      
+    
         i = 0;
-        for (balls) |ball| {
-            if (i>50 and removed) break;
-            pos = chip.cpBodyGetPosition(ball);
-            ray.DrawTexture(tex.texture, @floatToInt(i32, pos.x), 600-@floatToInt(i32,pos.y), ray.RED);
-            i+=1;
-        }
+        //for (balls) |ball| {
+        //    if (i>50 and removed) break;
+        //    pos = chip.cpBodyGetPosition(ball);
+        //    ray.DrawTexture(tex.texture, @floatToInt(i32, pos.x), 600-@floatToInt(i32,pos.y), ray.RED);
+        //    i+=1;
+        //}
 
         ray.DrawFPS(10,10);
 
         ray.EndDrawing();
 
-        if ( ray.GetTime() > 10.0 and !removed) {
-            removed = true;
-            i = 50;
-            while (i<100) : ( i+=1 ) {
-                chip.cpSpaceRemoveShape(space, ball_shapes[i]);
-                chip.cpSpaceRemoveBody(space, balls[i]);
-            }
-        } 
+        //while (i<100) : ( i+=1 ) {
+        //    chip.cpSpaceRemoveShape(space, ball_shapes[i]);
+        //    chip.cpSpaceRemoveBody(space, balls[i]);
+        //}
 
-        chip.cpSpaceStep(space, timeStep);
     }
 
 }
