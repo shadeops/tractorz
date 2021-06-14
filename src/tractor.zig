@@ -3,14 +3,11 @@ const json = std.json;
 
 const clibs = @import("clibs.zig");
 const curl = clibs.curl;
-    
-const tractor_url = "http://conduit.local/Tractor/monitor";
 
-pub fn fetchURL() !void  {
+var tractor_tsid: ?[23:0]u8 = null;
 
-    var arena_state = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-    defer arena_state.deinit();
-    var allocator = &arena_state.allocator;
+pub fn postTractor(allocator: *std.mem.Allocator, post: []const u8) !std.ArrayList(u8) {
+    var tractor_url = std.os.getenv("TRACTOR_URL") orelse "http://tractor/Tractor/monitor";
 
     // global curl init, or fail
     if (curl.curl_global_init(curl.CURL_GLOBAL_ALL) != .CURLE_OK)
@@ -25,14 +22,13 @@ pub fn fetchURL() !void  {
 
     // superfluous when using an arena allocator, but
     // important if the allocator implementation changes
-    defer response_buffer.deinit();
+    errdefer response_buffer.deinit();
 
     // setup curl options
-    if (curl.curl_easy_setopt(handle, .CURLOPT_URL, tractor_url) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, .CURLOPT_URL, tractor_url.ptr) != .CURLE_OK)
         return error.CouldNotSetURL;
 
-    const post = "q=subscribe&jids=0&tsid=60c30eb8-4601a8c0-00003";
-    if (curl.curl_easy_setopt(handle, .CURLOPT_POSTFIELDS, post) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, .CURLOPT_POSTFIELDS, post.ptr) != .CURLE_OK)
         return error.CouldNotSetPost;
 
     // set write function callbacks
@@ -45,12 +41,65 @@ pub fn fetchURL() !void  {
     if (curl.curl_easy_perform(handle) != .CURLE_OK)
         return error.FailedToPerformRequest;
 
-    std.log.info("Got response of {d} bytes", .{response_buffer.items.len});
-    std.debug.print("{s}\n", .{response_buffer.items});
+    return response_buffer;
+}
+
+pub fn tractorLogin(allocator: *std.mem.Allocator) !?[23:0]u8 {
+    std.debug.print("Logging into Tractor\n", .{});
+    var buf: [64:0]u8 = undefined;
+    var post = try std.fmt.bufPrintZ(buf[0..], "q=login&user={s}", .{std.os.getenv("USER")});
+    var response = try postTractor(allocator, post);
+    defer response.deinit();
+
+    var p = json.Parser.init(allocator, false);
+    defer p.deinit();
+
+    var tree = try p.parse(response.items);
+    defer tree.deinit();
+
+    std.debug.print("login\n{s}\n", .{response.items});
+    tractor_tsid = [_:0]u8{0} ** 23;
+    for (tree.root.Object.get("tsid").?.String) |v, i| {
+        tractor_tsid.?[i] = v;
+    }
+    std.debug.print("{s}\n", .{tractor_tsid});
+    return tractor_tsid;
+}
+
+fn parseResponse(allocator: *std.mem.Allocator, response: std.ArrayList(u8)) !u32 {
+    var p = json.Parser.init(allocator, false);
+    defer p.deinit();
+
+    var tree = try p.parse(response.items);
+    defer tree.deinit();
+
+    var mbox = tree.root.Object.get("mbox") orelse return 0;
+
+    var active_commands: u32 = 0;
+    for (mbox.Array.items) |item| {
+        if (std.mem.eql(u8, item.Array.items[0].String, "c")) {
+            if (std.mem.eql(u8, item.Array.items[4].String, "A")) active_commands += 1;
+        }
+    }
+
+    //try std.testing.expectEqualStrings("c", tree.root.Object.get("mbox").?.Array.items[0].Array.items[0].String);
+    return active_commands;
+}
+
+pub fn queryTractor(allocator: *std.mem.Allocator) !u32 {
+    var buf: [48:0]u8 = undefined;
+    var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&jids=0&tsid={s}", .{tractor_tsid.?});
+    //const post = "q=subscribe&jids=0&tsid=60c30eb8-4601a8c0-00003";
+    var response = try postTractor(allocator, post);
+    defer response.deinit();
+
+    //std.log.info("Got response of {d} bytes", .{response_buffer.items.len});
+    //std.debug.print("{s}\n", .{response_buffer.items});
+
+    return parseResponse(allocator, response);
 }
 
 fn writeToArrayListCallback(data: *c_void, size: c_uint, nmemb: c_uint, user_data: *c_void) callconv(.C) c_uint {
-    
     var buffer = @intToPtr(*std.ArrayList(u8), @ptrToInt(user_data));
     var typed_data = @intToPtr([*]u8, @ptrToInt(data));
     buffer.appendSlice(typed_data[0 .. nmemb * size]) catch return 0;
@@ -58,40 +107,43 @@ fn writeToArrayListCallback(data: *c_void, size: c_uint, nmemb: c_uint, user_dat
 }
 
 pub const ThreadContext = struct {
+    allocator: *std.mem.Allocator,
     count: u32,
     is_ready: bool,
 };
 
-fn appendNum(ctx: * ThreadContext) !void {
+fn appendNum(ctx: *ThreadContext) !void {
     var prng = std.rand.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         try std.os.getrandom(std.mem.asBytes(&seed));
         break :blk 42;
     });
     const rand = &prng.random;
-   
-    while(true) {
-        var rand_val = rand.intRangeAtMost(u32, 1, 100);
-       
-        // barrier until is_ready is true
-        while (@atomicLoad(bool, &ctx.is_ready, .SeqCst) ) {
-            // spinLoopHint() ?
+
+    while (true) {
+        //var val = rand.intRangeAtMost(u32, 1, 100);
+        var val = try queryTractor(ctx.allocator);
+
+        if (val > 0) {
+            // barrier until is_ready is true
+            while (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
+                // spinLoopHint() ?
+            }
+
+            @atomicStore(u32, &ctx.count, val, .SeqCst);
+            @atomicStore(bool, &ctx.is_ready, true, .SeqCst);
         }
 
-        @atomicStore(u32, &ctx.count, rand_val, .SeqCst);
-        @atomicStore(bool, &ctx.is_ready, true, .SeqCst);
-        
         std.time.sleep(1 * std.time.ns_per_s);
     }
 }
 
-pub fn startListener(ctx: * ThreadContext) !*std.Thread {
+pub fn startListener(ctx: *ThreadContext) !*std.Thread {
     var thread = try std.Thread.spawn(appendNum, ctx);
     return thread;
 }
 
 pub fn runnin() !void {
-
     var ctx: ThreadContext = .{
         .count = 0,
         .is_ready = false,
@@ -99,7 +151,7 @@ pub fn runnin() !void {
     var thread = try startListener(&ctx);
     //defer thread.wait();
 
-    while(true) {
+    while (true) {
         if (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
             var count = @atomicRmw(u32, &ctx.count, .Xchg, 0, .SeqCst);
             @atomicStore(bool, &ctx.is_ready, false, .SeqCst);
@@ -111,11 +163,10 @@ pub fn runnin() !void {
 }
 
 test "json parse" {
-
     var p = json.Parser.init(std.testing.allocator, false);
     defer p.deinit();
 
-    const s = 
+    const s =
         \\{
         \\"mbox": [
         \\  ["c", 22,1,1,"A",264,"conduit/192.168.1.54",9005,1,1,0,0, "wolfwood", 1623522582.381],
@@ -126,10 +177,30 @@ test "json parse" {
         \\"trigger": "updates"
         \\}
     ;
-    
+
     var tree = try p.parse(s);
     defer tree.deinit();
 
-    try std.testing.expectEqualStrings("c", tree.root.Object.get("mbox").?.Array.items[0].Array.items[0].String);
+    //std.debug.print("{s}\n", .{std.os.getenv("USER")});
+    //const foo = [9]u8{ 's', 'h', 'a', 'p', 'e', 'o', 'p', 's', 0 };
+    //const boo = "shadeops";
+    //std.debug.print("{s}\n", .{std.os.getenv("USER")});
+    //std.debug.print("{s}\n", .{boo});
+    //std.debug.print("hello\n", .{});
+
+    //try std.testing.expectEqualStrings("c", tree.root.Object.get("mbox").?.Array.items[0].Array.items[0].String);
+    try std.testing.expectEqualStrings("updates", tree.root.Object.get("trigger").?.String);
 }
 
+test "tractor login" {
+    std.debug.print("\n\n", .{});
+    var out = tractorLogin(std.testing.allocator);
+}
+
+// Logout
+// /Tractor/monitor?q=logout&user=shadeops&tsid=60c698fe-4601a8c0-00006
+
+// Login
+// /Tractor/monitor?q=login&user=shadeops
+// recvfrom(3<socket:[1101485]>, "HTTP/1.1 200 OK\r\nDate: Mon, 14 Jun 2021 01:09:11 GMT\r\nServer: Pixar_Tractor/2.4 (Aug 17 2020 05:39:38 2091325 linux-ix86-64-gcc44icc150-release)\r\nConnection: close\r\nSet-Cookie: TractorUser=shadeops; expires=Sun, 12-Sep-2021 01:09:11 GMT; path=/; HttpOnly\r\nSet-Cookie: TractorSID=expired; expires=Tue, 18-Sep-2018 01:09:11 GMT; path=/; HttpOnly\r\nContent-Type: application/json; charset=utf-8\r\nX-Tractor-STUN: 192.168.1.70\r\nX-Tractor-Lmt: c6ac37\r\nLast-Modified: Mon, 14 Jun 2021 01:09:11 GMT\r\nExpires: Mon, 14 Jun 2021 01:09:11 GMT\r\nCache-Control: no-cache\r\nContent-Length: 319\r\n\r\n{\n \"rc\": 0, \"login\": \"ok\",\n \"host\": \"192.168.1.70\",\n \"user\": \"shadeops\",\n \"tsid\": \"60c6ac37-4601a8c0-00007\",\n \"crews\": [\"Administrators\", \"ValidLogins\"],\n \"access\": {\n   \"jnotes\": 1,\n   \"bnotes\": 1\n },\n \"engine\": \"Tractor 2.4 (Aug 17 2020 05:39:38 2091325 linux-ix86-64-gcc44icc150-release)\",\n \"protocol\": \"sv-1.6\"\n}\n\r\n", 4096, 0, NULL, NULL) = 898
+// {u'trigger': u'timeout', u'mbox': [[u'j', u'loaded', 32, u'wolfwood', 1623633100.878]]}

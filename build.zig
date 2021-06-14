@@ -1,8 +1,8 @@
 const std = @import("std");
 
 fn buildCmake(b: *std.build.Builder, repo: []const u8) void {
-    var build_buffer: [32] u8 = undefined;
-    var src_buffer: [32] u8 = undefined;
+    var build_buffer: [32]u8 = undefined;
+    var src_buffer: [32]u8 = undefined;
     const raylib_cmake = b.addSystemCommand(&[_][]const u8{
         "cmake",
         "-B",
@@ -20,7 +20,6 @@ fn buildCmake(b: *std.build.Builder, repo: []const u8) void {
         std.fmt.bufPrint(build_buffer[0..], "ext/{s}/build", .{repo}) catch unreachable,
     });
     raylib_build.step.make() catch {};
-    
 }
 
 pub fn build(b: *std.build.Builder) void {
@@ -62,5 +61,13 @@ pub fn build(b: *std.build.Builder) void {
     const test_step = b.step("test", "Run Tests");
     const tests = b.addTest("src/tractor.zig");
     tests.setBuildMode(mode);
+    tests.addIncludeDir("ext/Chipmunk2D/include");
+    tests.addIncludeDir("/usr/include/x86_64-linux-gnu");
+    tests.addLibPath("ext/Chipmunk2D/build/src");
+    tests.addLibPath("ext/raylib/build/raylib");
+    tests.linkSystemLibraryName("chipmunk");
+    tests.linkSystemLibraryName("raylib");
+    tests.linkSystemLibraryName("curl");
+    tests.linkLibC();
     test_step.dependOn(&tests.step);
 }
