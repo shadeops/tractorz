@@ -142,6 +142,9 @@ fn vis(allocator: *std.mem.Allocator) !void {
         ray.BeginDrawing();
         ray.ClearBackground(ray.BLACK);
 
+        ray.DrawLine(-20, 600-300, 450, 600-100, ray.WHITE);
+        ray.DrawLine(350, 600-0, 820, 600-200, ray.WHITE);
+
         i = 0;
         //for (balls) |ball| {
         //    if (i>50 and removed) break;
