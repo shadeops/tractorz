@@ -51,8 +51,8 @@ fn spawnNewObjects(space: *chip.cpSpace, rand: *std.rand.Random, looks: *Looks, 
 
     var i: usize = 0;
     while (i < active) : (i += 1) {
-        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 55, 265));
-        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 65, 265));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 35));
 
         var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
         chip.cpBodySetPosition(body, chip.cpv(x_pos, 610 + y_pos));
@@ -66,8 +66,8 @@ fn spawnNewObjects(space: *chip.cpSpace, rand: *std.rand.Random, looks: *Looks, 
     
     i = 0;
     while (i < blocked) : (i += 1) {
-        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 55, 265));
-        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 65, 265));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 35));
 
         var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
         chip.cpBodySetPosition(body, chip.cpv(x_pos, 610 + y_pos));
@@ -199,7 +199,7 @@ fn vis(allocator: *std.mem.Allocator) !void {
         .active = .{.color = ray.LIME, .state=0},
         .done = .{.color = ray.SKYBLUE, .state=1},
         .err = .{.color = ray.RED, .state=2},
-        .blocked = .{.color = ray.DARKGRAY, .state=3},
+        .blocked = .{.color = ray.ORANGE, .state=3},
     };
     
     ray.SetTargetFPS(60);

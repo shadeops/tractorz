@@ -94,7 +94,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     exe.addIncludeDir("ext/Chipmunk2D/include");
-    exe.addIncludeDir("/usr/include/x86_64-linux-gnu");
+    exe.addIncludeDir("ext/curl/include");
     exe.addLibPath("ext/Chipmunk2D/build/src");
     exe.addLibPath("ext/raylib/build/raylib");
     exe.linkSystemLibraryName("chipmunk");
