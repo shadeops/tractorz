@@ -217,7 +217,7 @@ fn vis(allocator: *std.mem.Allocator) !void {
     chip.cpShapeSetElasticity(active_ramp_shape, 0.9);
     chip.cpShapeSetFilter(active_ramp_shape, active_filter); 
     _ = chip.cpSpaceAddShape(space, active_ramp_shape);
-
+    
     var active_farm_l_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(330, 600-280), chip.cpv(370, 600-320), 8);
     chip.cpShapeSetFriction(active_farm_l_shape, 0.5);
     chip.cpShapeSetElasticity(active_farm_l_shape, 0.9);
@@ -229,6 +229,15 @@ fn vis(allocator: *std.mem.Allocator) !void {
     chip.cpShapeSetElasticity(active_farm_r_shape, 0.9);
     chip.cpShapeSetFilter(active_farm_r_shape, active_filter); 
     _ = chip.cpSpaceAddShape(space, active_farm_r_shape);
+    
+    var ramp_pad_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-150), chip.cpv(50, 600-150), 3);
+    chip.cpShapeSetFriction(ramp_pad_shape, 0.5);
+    chip.cpShapeSetElasticity(ramp_pad_shape, 0.9);
+    chip.cpShapeSetFilter(ramp_pad_shape, .{.group = chip.CP_NO_GROUP,
+                                            .categories = active_filter.categories | blocked_filter.categories,
+                                            .mask = 0,
+                                          });
+    _ = chip.cpSpaceAddShape(space, ramp_pad_shape);
     
     var blocked_ramp_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-155), chip.cpv(820, 600-278), 10);
     chip.cpShapeSetFriction(blocked_ramp_shape, 0.5);
