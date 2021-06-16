@@ -230,12 +230,12 @@ fn vis(allocator: *std.mem.Allocator) !void {
     chip.cpShapeSetFilter(active_farm_r_shape, active_filter); 
     _ = chip.cpSpaceAddShape(space, active_farm_r_shape);
     
-    var ramp_pad_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-150), chip.cpv(50, 600-150), 3);
+    var ramp_pad_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-150), chip.cpv(50, 600-120), 3);
     chip.cpShapeSetFriction(ramp_pad_shape, 0.5);
     chip.cpShapeSetElasticity(ramp_pad_shape, 0.9);
     chip.cpShapeSetFilter(ramp_pad_shape, .{.group = chip.CP_NO_GROUP,
                                             .categories = active_filter.categories | blocked_filter.categories,
-                                            .mask = 0,
+                                            .mask = active_filter.categories | blocked_filter.categories,
                                           });
     _ = chip.cpSpaceAddShape(space, ramp_pad_shape);
     
