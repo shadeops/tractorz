@@ -4,7 +4,14 @@ const json = std.json;
 const clibs = @import("clibs.zig");
 const curl = clibs.curl;
 
-var tractor_tsid: ?[23:0]u8 = null;
+var tractor_tsid: ?[36:0]u8 = null;
+
+pub const Messages = struct {
+    active: u32 = 0,
+    blocked: u32 = 0,
+    done: u32 = 0,
+    err: u32 = 0,
+};
 
 pub fn postTractor(allocator: *std.mem.Allocator, post: []const u8) !std.ArrayList(u8) {
     var tractor_url = std.os.getenv("TRACTOR_URL") orelse "http://tractor/Tractor/monitor";
@@ -44,8 +51,8 @@ pub fn postTractor(allocator: *std.mem.Allocator, post: []const u8) !std.ArrayLi
     return response_buffer;
 }
 
-pub fn tractorLogin(allocator: *std.mem.Allocator) !?[23:0]u8 {
-    std.debug.print("Logging into Tractor\n", .{});
+pub fn tractorLogin(allocator: *std.mem.Allocator) !?[36:0]u8 {
+    //std.debug.print("Logging into Tractor\n", .{});
     var buf: [64:0]u8 = undefined;
     var post = try std.fmt.bufPrintZ(buf[0..], "q=login&user={s}", .{std.os.getenv("USER")});
     var response = try postTractor(allocator, post);
@@ -57,44 +64,45 @@ pub fn tractorLogin(allocator: *std.mem.Allocator) !?[23:0]u8 {
     var tree = try p.parse(response.items);
     defer tree.deinit();
 
-    std.debug.print("login\n{s}\n", .{response.items});
-    tractor_tsid = [_:0]u8{0} ** 23;
+    //std.debug.print("login\n{s}\n", .{response.items});
+    tractor_tsid = [_:0]u8{0} ** 36;
     for (tree.root.Object.get("tsid").?.String) |v, i| {
         tractor_tsid.?[i] = v;
     }
-    std.debug.print("{s}\n", .{tractor_tsid});
+    //std.debug.print("{s}\n", .{tractor_tsid});
     return tractor_tsid;
 }
 
-fn parseResponse(allocator: *std.mem.Allocator, response: std.ArrayList(u8)) !u32 {
+fn parseResponse(allocator: *std.mem.Allocator, response: std.ArrayList(u8)) !?Messages {
     var p = json.Parser.init(allocator, false);
     defer p.deinit();
 
     var tree = try p.parse(response.items);
     defer tree.deinit();
 
-    var mbox = tree.root.Object.get("mbox") orelse return 0;
+    var mbox = tree.root.Object.get("mbox") orelse return null;
+
+    var msgs = Messages{};
 
     var active_commands: u32 = 0;
     for (mbox.Array.items) |item| {
         if (std.mem.eql(u8, item.Array.items[0].String, "c")) {
-            if (std.mem.eql(u8, item.Array.items[4].String, "A")) active_commands += 1;
+            if (std.mem.eql(u8, item.Array.items[4].String, "A")) msgs.active += 1;
+            if (std.mem.eql(u8, item.Array.items[4].String, "B")) msgs.blocked += 1;
+            if (std.mem.eql(u8, item.Array.items[4].String, "D")) msgs.done += 1;
+            if (std.mem.eql(u8, item.Array.items[4].String, "E")) msgs.err += 1;
         }
     }
 
     //try std.testing.expectEqualStrings("c", tree.root.Object.get("mbox").?.Array.items[0].Array.items[0].String);
-    return active_commands;
+    return msgs;
 }
 
-pub fn queryTractor(allocator: *std.mem.Allocator) !u32 {
-    var buf: [48:0]u8 = undefined;
+pub fn queryTractor(allocator: *std.mem.Allocator) !?Messages {
+    var buf: [64:0]u8 = undefined;
     var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&jids=0&tsid={s}", .{tractor_tsid.?});
-    //const post = "q=subscribe&jids=0&tsid=60c30eb8-4601a8c0-00003";
     var response = try postTractor(allocator, post);
     defer response.deinit();
-
-    //std.log.info("Got response of {d} bytes", .{response_buffer.items.len});
-    //std.debug.print("{s}\n", .{response_buffer.items});
 
     return parseResponse(allocator, response);
 }
@@ -108,7 +116,7 @@ fn writeToArrayListCallback(data: *c_void, size: c_uint, nmemb: c_uint, user_dat
 
 pub const ThreadContext = struct {
     allocator: *std.mem.Allocator,
-    count: u32,
+    msgs: Messages,
     is_ready: bool,
 };
 
@@ -122,44 +130,26 @@ fn appendNum(ctx: *ThreadContext) !void {
 
     while (true) {
         //var val = rand.intRangeAtMost(u32, 1, 100);
-        var val = try queryTractor(ctx.allocator);
+        defer std.time.sleep(1 * std.time.ns_per_s);
+        
+        var val = (try queryTractor(ctx.allocator)) orelse continue;
 
-        if (val > 0) {
-            // barrier until is_ready is true
-            while (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
-                // spinLoopHint() ?
-            }
-
-            @atomicStore(u32, &ctx.count, val, .SeqCst);
-            @atomicStore(bool, &ctx.is_ready, true, .SeqCst);
+        // barrier until is_ready is true
+        while (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
+            // spinLoopHint() ?
         }
-
-        std.time.sleep(1 * std.time.ns_per_s);
+        
+        @atomicStore(u32, &ctx.msgs.active, val.active, .SeqCst);
+        @atomicStore(u32, &ctx.msgs.blocked, val.blocked, .SeqCst);
+        @atomicStore(u32, &ctx.msgs.err, val.err, .SeqCst);
+        @atomicStore(u32, &ctx.msgs.done, val.done, .SeqCst);
+        @atomicStore(bool, &ctx.is_ready, true, .SeqCst);
     }
 }
 
 pub fn startListener(ctx: *ThreadContext) !*std.Thread {
     var thread = try std.Thread.spawn(appendNum, ctx);
     return thread;
-}
-
-pub fn runnin() !void {
-    var ctx: ThreadContext = .{
-        .count = 0,
-        .is_ready = false,
-    };
-    var thread = try startListener(&ctx);
-    //defer thread.wait();
-
-    while (true) {
-        if (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
-            var count = @atomicRmw(u32, &ctx.count, .Xchg, 0, .SeqCst);
-            @atomicStore(bool, &ctx.is_ready, false, .SeqCst);
-            std.debug.print("{}\n", .{count});
-        } else {
-            std.time.sleep(16 * std.time.ms_per_s);
-        }
-    }
 }
 
 test "json parse" {
@@ -193,8 +183,18 @@ test "json parse" {
 }
 
 test "tractor login" {
-    std.debug.print("\n\n", .{});
-    var out = tractorLogin(std.testing.allocator);
+    var msg = Messages{};
+    var msg2 = Messages{};
+    msg2.active = 10;
+    msg.err = 5;
+    msg = msg2;
+    try std.testing.expect(msg.err ==  msg2.err);
+}
+
+test "bit compare" {
+    var a: u32 = 1;
+    var b: u32 = 2;
+    try std.testing.expect( (a|b) == 3);
 }
 
 // Logout

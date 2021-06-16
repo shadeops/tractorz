@@ -1,25 +1,78 @@
 const std = @import("std");
 
-fn buildCmake(b: *std.build.Builder, repo: []const u8) void {
-    var build_buffer: [32]u8 = undefined;
-    var src_buffer: [32]u8 = undefined;
-    const raylib_cmake = b.addSystemCommand(&[_][]const u8{
+fn buildRaylib(b: *std.build.Builder) void {
+    const cmake = b.addSystemCommand(&[_][]const u8{
         "cmake",
         "-B",
-        std.fmt.bufPrint(build_buffer[0..], "ext/{s}/build", .{repo}) catch unreachable,
+        "ext/raylib/build",
         "-S",
-        std.fmt.bufPrint(src_buffer[0..], "ext/{s}", .{repo}) catch unreachable,
-        "-DOpenGL_GL_PREFERENCE=GLVND",
+        "ext/raylib",
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DOpenGL_GL_PREFERENCE=GLVND",
+        "-DBUILD_EXAMPLES=OFF",
     });
-    raylib_cmake.step.make() catch {};
+    cmake.step.make() catch {};
 
-    const raylib_build = b.addSystemCommand(&[_][]const u8{
+    const cmake_build = b.addSystemCommand(&[_][]const u8{
         "cmake",
         "--build",
-        std.fmt.bufPrint(build_buffer[0..], "ext/{s}/build", .{repo}) catch unreachable,
+        "ext/raylib/build",
+        "--",
+        "-j",
+        "16",
     });
-    raylib_build.step.make() catch {};
+    cmake_build.step.make() catch {};
+}
+
+fn buildChipmunk(b: *std.build.Builder) void {
+    const cmake = b.addSystemCommand(&[_][]const u8{
+        "cmake",
+        "-B",
+        "ext/Chipmunk2D/build",
+        "-S",
+        "ext/Chipmunk2D",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DBUILD_DEMOS=OFF",
+        "-DBUILD_SHARED=OFF",
+    });
+    cmake.step.make() catch {};
+
+    const cmake_build = b.addSystemCommand(&[_][]const u8{
+        "cmake",
+        "--build",
+        "ext/Chipmunk2D/build",
+        "--",
+        "-j",
+        "16",
+    });
+    cmake_build.step.make() catch {};
+}
+
+fn buildCurl(b: *std.build.Builder) void {
+    const cmake = b.addSystemCommand(&[_][]const u8{
+        "cmake",
+        "-B",
+        "ext/curl/build",
+        "-S",
+        "ext/curl",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DHTTP_ONLY=ON",
+        "-DBUILD_CURL_EXE=OFF",
+        "-DBUILD_SHARED_LIBS=OFF",
+        "-DCMAKE_USE_LIBSSH2=OFF",
+        "-DCMAKE_USE_LIBSSH=OFF",
+    });
+    cmake.step.make() catch {};
+
+    const cmake_build = b.addSystemCommand(&[_][]const u8{
+        "cmake",
+        "--build",
+        "ext/curl/build",
+        "--",
+        "-j",
+        "16",
+    });
+    cmake_build.step.make() catch {};
 }
 
 pub fn build(b: *std.build.Builder) void {
@@ -33,8 +86,9 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    //buildCmake(b, "raylib");
-    //buildCmake(b, "Chipmunk2D");
+    buildRaylib(b);
+    buildChipmunk(b);
+    buildCurl(b);
 
     const exe = b.addExecutable("tractorz", "src/main.zig");
     exe.setTarget(target);
@@ -62,9 +116,10 @@ pub fn build(b: *std.build.Builder) void {
     const tests = b.addTest("src/tractor.zig");
     tests.setBuildMode(mode);
     tests.addIncludeDir("ext/Chipmunk2D/include");
-    tests.addIncludeDir("/usr/include/x86_64-linux-gnu");
+    tests.addIncludeDir("ext/curl/include");
     tests.addLibPath("ext/Chipmunk2D/build/src");
     tests.addLibPath("ext/raylib/build/raylib");
+    tests.addLibPath("ext/curl/build/lib");
     tests.linkSystemLibraryName("chipmunk");
     tests.linkSystemLibraryName("raylib");
     tests.linkSystemLibraryName("curl");

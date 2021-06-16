@@ -6,57 +6,110 @@ const ray = clibs.ray;
 const chip = clibs.chipmunk;
 
 fn makeTexture() ray.RenderTexture2D {
-    var tex = ray.LoadRenderTexture(4, 4);
+    var tex = ray.LoadRenderTexture(8, 8);
     ray.BeginTextureMode(tex);
-    ray.ClearBackground(ray.BLACK);
-    ray.DrawCircle(2, 2, 2.0, ray.WHITE);
+    ray.ClearBackground(ray.BLANK);
+    ray.DrawCircle(4, 4, 4.0, ray.WHITE);
     ray.EndTextureMode();
 
     return tex;
 }
 
+const bg_png = @embedFile("../resources/bg.png");
+const fg_png = @embedFile("../resources/fg.png");
+
 pub fn main() anyerror!void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
+    var allocator = &arena.allocator;
+
     //try tractor.queryTractor();
     //try tractor.runnin();
 
-    _ = try tractor.tractorLogin(&arena.allocator);
-
-    try vis(&arena.allocator);
+    _ = try tractor.tractorLogin(allocator);
+    try vis(allocator);
 
     return;
 }
 
-fn spawnNewObjects(space: *chip.cpSpace, rand: *std.rand.Random, ctx: *tractor.ThreadContext) u32 {
+fn spawnNewObjects(space: *chip.cpSpace, rand: *std.rand.Random, looks: *Looks, ctx: *tractor.ThreadContext,) u32 {
+    
     if (!@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
         return 0;
     }
 
-    var count = @atomicRmw(u32, &ctx.count, .Xchg, 0, .SeqCst);
+    var active = @atomicRmw(u32, &ctx.msgs.active, .Xchg, 0, .SeqCst);
+    var blocked = @atomicRmw(u32, &ctx.msgs.blocked, .Xchg, 0, .SeqCst);
+    var err = @atomicRmw(u32, &ctx.msgs.err, .Xchg, 0, .SeqCst);
+    var done = @atomicRmw(u32, &ctx.msgs.done, .Xchg, 0, .SeqCst);
     @atomicStore(bool, &ctx.is_ready, false, .SeqCst);
 
-    std.debug.print("{}\n", .{count});
-
-    const radius: f64 = 2;
+    const radius: f64 = 4;
     const mass: f64 = 1;
     var moment = chip.cpMomentForCircle(mass, 0, radius, chip.cpvzero);
 
     var i: usize = 0;
-    while (i < count) : (i += 1) {
-        var x_pos = @intToFloat(f64, rand.uintLessThan(u32, 800));
+    while (i < active) : (i += 1) {
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 55, 265));
         var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
 
         var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
         chip.cpBodySetPosition(body, chip.cpv(x_pos, 610 + y_pos));
+        chip.cpBodySetUserData(body, @ptrCast(* c_void, &looks.active));
 
         var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
-        chip.cpShapeSetFriction(shape, 0.7);
+        chip.cpShapeSetFriction(shape, 0.5);
         chip.cpShapeSetElasticity(shape, 0.2);
+        chip.cpShapeSetFilter(shape, active_filter); 
+    }
+    
+    i = 0;
+    while (i < blocked) : (i += 1) {
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 55, 265));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
+
+        var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
+        chip.cpBodySetPosition(body, chip.cpv(x_pos, 610 + y_pos));
+        chip.cpBodySetUserData(body, @ptrCast(* c_void, &looks.blocked));
+
+        var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
+        chip.cpShapeSetFriction(shape, 0.5);
+        chip.cpShapeSetElasticity(shape, 0.2);
+        chip.cpShapeSetFilter(shape, blocked_filter); 
+    }
+    
+    i = 0;
+    while (i < done) : (i += 1) {
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 245, 360));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 20));
+
+        var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
+        chip.cpBodySetPosition(body, chip.cpv(x_pos, 600-400 + y_pos));
+        chip.cpBodySetUserData(body, @ptrCast(* c_void, &looks.done));
+
+        var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
+        chip.cpShapeSetFriction(shape, 0.5);
+        chip.cpShapeSetElasticity(shape, 0.2);
+        chip.cpShapeSetFilter(shape, done_filter); 
+    }
+    
+    i = 0;
+    while (i < err) : (i += 1) {
+        var x_pos = @intToFloat(f64, rand.intRangeAtMost(u32, 330, 470));
+        var y_pos = @intToFloat(f64, rand.uintLessThan(u32, 30));
+
+        var body = chip.cpSpaceAddBody(space, chip.cpBodyNew(mass, moment)) orelse unreachable;
+        chip.cpBodySetPosition(body, chip.cpv(x_pos, 600-465 + y_pos));
+        chip.cpBodySetUserData(body, @ptrCast(* c_void, &looks.err));
+
+        var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
+        chip.cpShapeSetFriction(shape, 0.5);
+        chip.cpShapeSetElasticity(shape, 0.2);
+        chip.cpShapeSetFilter(shape, chip.CP_SHAPE_FILTER_NONE);
     }
 
-    return count;
+    return active + err + blocked + done;
 }
 
 fn cullShape(space: ?*chip.cpSpace, shape: ?*c_void, data: ?*c_void) callconv(.C) void {
@@ -75,23 +128,65 @@ fn postCullShapeWrapper(body: ?*chip.cpBody, shape: ?*chip.cpShape, data: ?*c_vo
 }
 
 fn drawShapes(body: ?*chip.cpBody, data: ?*c_void) callconv(.C) void {
+    var body_data = chip.cpBodyGetUserData(body);
+    // No color info means not "renderable"
+    if (body_data == null) return;
+    
+    var look = @ptrCast(* Look, chip.cpBodyGetUserData(body).?).*;
+    
     var pos = chip.cpBodyGetPosition(body);
     var space = chip.cpBodyGetSpace(body);
-    if (pos.y < -10) {
+    if (pos.y < -10 or (pos.y < (600-350) and look.state==0 )) {
         chip.cpBodyEachShape(body, postCullShapeWrapper, null);
         var success = chip.cpSpaceAddPostStepCallback(space, cullBody, body, null);
     }
-
     var tex: *ray.Texture = @ptrCast(*ray.Texture, @alignCast(4, data));
-    ray.DrawTexture(tex.*, @floatToInt(i32, pos.x), 600 - @floatToInt(i32, pos.y), ray.RED);
+    ray.DrawTexture(tex.*, @floatToInt(i32, pos.x), 600 - @floatToInt(i32, pos.y), look.color);
 }
 
+const Look = struct {
+    color: ray.Color,
+    state: u8,
+};
+
+const Looks = struct {
+    active: Look,
+    done: Look,
+    err: Look,
+    blocked: Look,
+};
+
+const active_filter = chip.cpShapeFilter{.group = chip.CP_NO_GROUP,
+                                         .categories = 0b1,
+                                         .mask = 0b1,
+                                         };
+
+const blocked_filter = chip.cpShapeFilter{.group = chip.CP_NO_GROUP,
+                                          .categories = 0b10,
+                                          .mask = 0b10,
+                                          };
+
+const done_filter = chip.cpShapeFilter{.group = chip.CP_NO_GROUP,
+                                       .categories = 0b100,
+                                       .mask = 0b100,
+                                      };
+
 fn vis(allocator: *std.mem.Allocator) !void {
+    ray.SetTraceLogLevel(ray.LOG_ERROR);
     ray.InitWindow(800, 600, "tractorz");
     defer ray.CloseWindow();
 
     var tex = makeTexture();
     defer ray.UnloadRenderTexture(tex);
+
+    //var background = ray.LoadTexture("resources/bg.png");
+    //defer ray.UnloadTexture(background);
+    //var foreground = ray.LoadTexture("resources/fg.png");
+    //defer ray.UnloadTexture(foreground);
+    var foreground_img = ray.LoadImageFromMemory(".png", fg_png, fg_png.len);
+    var foreground = ray.LoadTextureFromImage(foreground_img);
+    var background_img = ray.LoadImageFromMemory(".png", bg_png, bg_png.len);
+    var background = ray.LoadTextureFromImage(background_img);
 
     var prng = std.rand.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
@@ -100,67 +195,81 @@ fn vis(allocator: *std.mem.Allocator) !void {
     });
     const rand = &prng.random;
 
+    var looks = Looks{
+        .active = .{.color = ray.LIME, .state=0},
+        .done = .{.color = ray.SKYBLUE, .state=1},
+        .err = .{.color = ray.RED, .state=2},
+        .blocked = .{.color = ray.DARKGRAY, .state=3},
+    };
+    
     ray.SetTargetFPS(60);
 
     const gravity = chip.cpv(0, -100);
 
     var space = chip.cpSpaceNew() orelse return;
     chip.cpSpaceSetGravity(space, gravity);
-    chip.cpSpaceSetDamping(space, 0.9);
+    //chip.cpSpaceSetDamping(space, 0.9);
 
-    var ground = chip.cpSpaceGetStaticBody(space);
-    var ground_shape_a = chip.cpSegmentShapeNew(ground, chip.cpv(-20, 300), chip.cpv(450, 100), 10);
-    var ground_shape_b = chip.cpSegmentShapeNew(ground, chip.cpv(350, 0), chip.cpv(820, 200), 10);
-    chip.cpShapeSetFriction(ground_shape_a, 1);
-    chip.cpShapeSetFriction(ground_shape_b, 1);
-    chip.cpShapeSetElasticity(ground_shape_a, 0.9);
-    chip.cpShapeSetElasticity(ground_shape_b, 0.9);
+    var static_body = chip.cpSpaceGetStaticBody(space);
 
-    _ = chip.cpSpaceAddShape(space, ground_shape_a);
-    _ = chip.cpSpaceAddShape(space, ground_shape_b);
+    var active_ramp_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-155), chip.cpv(330, 600-200), 10);
+    chip.cpShapeSetFriction(active_ramp_shape, 0.5);
+    chip.cpShapeSetElasticity(active_ramp_shape, 0.9);
+    chip.cpShapeSetFilter(active_ramp_shape, active_filter); 
+    _ = chip.cpSpaceAddShape(space, active_ramp_shape);
+
+    var active_farm_l_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(330, 600-280), chip.cpv(370, 600-320), 8);
+    chip.cpShapeSetFriction(active_farm_l_shape, 0.5);
+    chip.cpShapeSetElasticity(active_farm_l_shape, 0.9);
+    chip.cpShapeSetFilter(active_farm_l_shape, active_filter); 
+    _ = chip.cpSpaceAddShape(space, active_farm_l_shape);
+
+    var active_farm_r_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(430, 600-320), chip.cpv(470, 600-280), 8);
+    chip.cpShapeSetFriction(active_farm_r_shape, 0.5);
+    chip.cpShapeSetElasticity(active_farm_r_shape, 0.9);
+    chip.cpShapeSetFilter(active_farm_r_shape, active_filter); 
+    _ = chip.cpSpaceAddShape(space, active_farm_r_shape);
+    
+    var blocked_ramp_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(50, 600-155), chip.cpv(820, 600-278), 10);
+    chip.cpShapeSetFriction(blocked_ramp_shape, 0.5);
+    chip.cpShapeSetElasticity(blocked_ramp_shape, 0.9);
+    chip.cpShapeSetFilter(blocked_ramp_shape, blocked_filter); 
+    _ = chip.cpSpaceAddShape(space, blocked_ramp_shape);
+    
+    var done_ramp_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(0, 600-490), chip.cpv(380, 600-422), 10);
+    chip.cpShapeSetElasticity(done_ramp_shape, 0.9);
+    chip.cpShapeSetFriction(done_ramp_shape, 0.5);
+    chip.cpShapeSetFilter(done_ramp_shape, done_filter); 
+    _ = chip.cpSpaceAddShape(space, done_ramp_shape);
 
     const timeStep: f64 = 1.0 / 60.0;
 
     var ctx: tractor.ThreadContext = .{
         .allocator = allocator,
-        .count = 0,
+        .msgs = tractor.Messages{},
         .is_ready = false,
     };
     var thread = try tractor.startListener(&ctx);
 
-    _ = spawnNewObjects(space, rand, &ctx);
+    _ = spawnNewObjects(space, rand, &looks, &ctx);
 
     var i: u32 = 0;
 
     while (!ray.WindowShouldClose()) {
-        _ = spawnNewObjects(space, rand, &ctx);
+        _ = spawnNewObjects(space, rand, &looks, &ctx);
 
         chip.cpSpaceStep(space, timeStep);
-
-        chip.cpSpaceEachBody(space, drawShapes, &tex.texture);
-
+                
         ray.BeginDrawing();
         ray.ClearBackground(ray.BLACK);
-
-        ray.DrawLine(-20, 600-300, 450, 600-100, ray.WHITE);
-        ray.DrawLine(350, 600-0, 820, 600-200, ray.WHITE);
-
-        i = 0;
-        //for (balls) |ball| {
-        //    if (i>50 and removed) break;
-        //    pos = chip.cpBodyGetPosition(ball);
-        //    ray.DrawTexture(tex.texture, @floatToInt(i32, pos.x), 600-@floatToInt(i32,pos.y), ray.RED);
-        //    i+=1;
-        //}
-
-        ray.DrawFPS(10, 10);
-
+        ray.DrawTexture(background, 0, 0, ray.WHITE);
+       
+        chip.cpSpaceEachBody(space, drawShapes, &tex.texture);
+        
+        ray.DrawTexture(foreground, 0, 0, ray.WHITE);
+        
+        //ray.DrawFPS(10, 10);
         ray.EndDrawing();
-
-        //while (i<100) : ( i+=1 ) {
-        //    chip.cpSpaceRemoveShape(space, ball_shapes[i]);
-        //    chip.cpSpaceRemoveBody(space, balls[i]);
-        //}
 
     }
 }
