@@ -131,14 +131,14 @@ fn appendNum(ctx: *ThreadContext) !void {
     while (true) {
         //var val = rand.intRangeAtMost(u32, 1, 100);
         defer std.time.sleep(1 * std.time.ns_per_s);
-        
+
         var val = (try queryTractor(ctx.allocator)) orelse continue;
 
         // barrier until is_ready is true
         while (@atomicLoad(bool, &ctx.is_ready, .SeqCst)) {
             // spinLoopHint() ?
         }
-        
+
         @atomicStore(u32, &ctx.msgs.active, val.active, .SeqCst);
         @atomicStore(u32, &ctx.msgs.blocked, val.blocked, .SeqCst);
         @atomicStore(u32, &ctx.msgs.err, val.err, .SeqCst);
@@ -152,55 +152,8 @@ pub fn startListener(ctx: *ThreadContext) !*std.Thread {
     return thread;
 }
 
-test "json parse" {
-    var p = json.Parser.init(std.testing.allocator, false);
-    defer p.deinit();
-
-    const s =
-        \\{
-        \\"mbox": [
-        \\  ["c", 22,1,1,"A",264,"conduit/192.168.1.54",9005,1,1,0,0, "wolfwood", 1623522582.381],
-        \\  ["c", 22,1,1,"D",9,"conduit/192.168.1.54",9005,1,0,1,0, "wolfwood", 1623522583.224],
-        \\  ["c", 22,0,0,"D",0,".",0,1,0,1,0, "wolfwood", 1623522583.231],
-        \\  ["j", "Done",22,"wolfwood", 1623522583.235]
-        \\],
-        \\"trigger": "updates"
-        \\}
-    ;
-
-    var tree = try p.parse(s);
-    defer tree.deinit();
-
-    //std.debug.print("{s}\n", .{std.os.getenv("USER")});
-    //const foo = [9]u8{ 's', 'h', 'a', 'p', 'e', 'o', 'p', 's', 0 };
-    //const boo = "shadeops";
-    //std.debug.print("{s}\n", .{std.os.getenv("USER")});
-    //std.debug.print("{s}\n", .{boo});
-    //std.debug.print("hello\n", .{});
-
-    //try std.testing.expectEqualStrings("c", tree.root.Object.get("mbox").?.Array.items[0].Array.items[0].String);
-    try std.testing.expectEqualStrings("updates", tree.root.Object.get("trigger").?.String);
-}
-
-test "tractor login" {
-    var msg = Messages{};
-    var msg2 = Messages{};
-    msg2.active = 10;
-    msg.err = 5;
-    msg = msg2;
-    try std.testing.expect(msg.err ==  msg2.err);
-}
-
 test "bit compare" {
     var a: u32 = 1;
     var b: u32 = 2;
-    try std.testing.expect( (a|b) == 3);
+    try std.testing.expect((a | b) == 3);
 }
-
-// Logout
-// /Tractor/monitor?q=logout&user=shadeops&tsid=60c698fe-4601a8c0-00006
-
-// Login
-// /Tractor/monitor?q=login&user=shadeops
-// recvfrom(3<socket:[1101485]>, "HTTP/1.1 200 OK\r\nDate: Mon, 14 Jun 2021 01:09:11 GMT\r\nServer: Pixar_Tractor/2.4 (Aug 17 2020 05:39:38 2091325 linux-ix86-64-gcc44icc150-release)\r\nConnection: close\r\nSet-Cookie: TractorUser=shadeops; expires=Sun, 12-Sep-2021 01:09:11 GMT; path=/; HttpOnly\r\nSet-Cookie: TractorSID=expired; expires=Tue, 18-Sep-2018 01:09:11 GMT; path=/; HttpOnly\r\nContent-Type: application/json; charset=utf-8\r\nX-Tractor-STUN: 192.168.1.70\r\nX-Tractor-Lmt: c6ac37\r\nLast-Modified: Mon, 14 Jun 2021 01:09:11 GMT\r\nExpires: Mon, 14 Jun 2021 01:09:11 GMT\r\nCache-Control: no-cache\r\nContent-Length: 319\r\n\r\n{\n \"rc\": 0, \"login\": \"ok\",\n \"host\": \"192.168.1.70\",\n \"user\": \"shadeops\",\n \"tsid\": \"60c6ac37-4601a8c0-00007\",\n \"crews\": [\"Administrators\", \"ValidLogins\"],\n \"access\": {\n   \"jnotes\": 1,\n   \"bnotes\": 1\n },\n \"engine\": \"Tractor 2.4 (Aug 17 2020 05:39:38 2091325 linux-ix86-64-gcc44icc150-release)\",\n \"protocol\": \"sv-1.6\"\n}\n\r\n", 4096, 0, NULL, NULL) = 898
-// {u'trigger': u'timeout', u'mbox': [[u'j', u'loaded', 32, u'wolfwood', 1623633100.878]]}

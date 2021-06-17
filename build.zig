@@ -59,8 +59,10 @@ fn buildCurl(b: *std.build.Builder) void {
         "-DHTTP_ONLY=ON",
         "-DBUILD_CURL_EXE=OFF",
         "-DBUILD_SHARED_LIBS=OFF",
+        "-DCMAKE_USE_OPENSSL=OFF",
         "-DCMAKE_USE_LIBSSH2=OFF",
         "-DCMAKE_USE_LIBSSH=OFF",
+        "-DCURL_ZLIB=OFF",
     });
     cmake.step.make() catch {};
 
@@ -97,6 +99,7 @@ pub fn build(b: *std.build.Builder) void {
     exe.addIncludeDir("ext/curl/include");
     exe.addLibPath("ext/Chipmunk2D/build/src");
     exe.addLibPath("ext/raylib/build/raylib");
+    exe.addLibPath("ext/curl/build/lib");
     exe.linkSystemLibraryName("chipmunk");
     exe.linkSystemLibraryName("raylib");
     exe.linkSystemLibraryName("curl");
