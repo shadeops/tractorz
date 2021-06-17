@@ -64,7 +64,7 @@ fn spawnNewObjects(
 
         var shape = chip.cpSpaceAddShape(space, chip.cpCircleShapeNew(body, radius, chip.cpvzero));
         chip.cpShapeSetFriction(shape, 0.5);
-        chip.cpShapeSetElasticity(shape, 0.5);
+        chip.cpShapeSetElasticity(shape, 0.2);
         chip.cpShapeSetFilter(shape, active_filter);
     }
 
@@ -245,13 +245,13 @@ fn vis(allocator: *std.mem.Allocator) !void {
 
     var active_farm_l_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(330, 600 - 280), chip.cpv(370, 600 - 320), 8);
     chip.cpShapeSetFriction(active_farm_l_shape, 0.5);
-    chip.cpShapeSetElasticity(active_farm_l_shape, 0.9);
+    chip.cpShapeSetElasticity(active_farm_l_shape, 1.0);
     chip.cpShapeSetFilter(active_farm_l_shape, active_ramp_filter);
     _ = chip.cpSpaceAddShape(space, active_farm_l_shape);
 
     var active_farm_r_shape = chip.cpSegmentShapeNew(static_body, chip.cpv(430, 600 - 320), chip.cpv(470, 600 - 280), 8);
     chip.cpShapeSetFriction(active_farm_r_shape, 0.5);
-    chip.cpShapeSetElasticity(active_farm_r_shape, 0.9);
+    chip.cpShapeSetElasticity(active_farm_r_shape, 1.0);
     chip.cpShapeSetFilter(active_farm_r_shape, active_ramp_filter);
     _ = chip.cpSpaceAddShape(space, active_farm_r_shape);
 
