@@ -27,7 +27,16 @@ pub fn main() anyerror!void {
     //try tractor.queryTractor();
     //try tractor.runnin();
 
-    _ = try tractor.tractorLogin(allocator);
+    _ = tractor.tractorLogin(allocator) catch |e| {
+        switch (e) {
+            error.FailedToPerformRequest => {
+                std.debug.print("Could not connect to Tractor\n", .{});
+                return;
+            },
+            else => return e,
+        }
+    };
+
     try vis(allocator);
 
     return;
@@ -117,18 +126,21 @@ fn spawnNewObjects(
 }
 
 fn cullShape(space: ?*chip.cpSpace, shape: ?*c_void, data: ?*c_void) callconv(.C) void {
+    _ = data;
     chip.cpSpaceRemoveShape(space, @ptrCast(*chip.cpShape, shape));
     chip.cpShapeFree(@ptrCast(*chip.cpShape, shape));
 }
 
 fn cullBody(space: ?*chip.cpSpace, body: ?*c_void, data: ?*c_void) callconv(.C) void {
+    _ = data;
     chip.cpSpaceRemoveBody(space, @ptrCast(*chip.cpBody, body));
     chip.cpBodyFree(@ptrCast(*chip.cpBody, body));
 }
 
 fn postCullShapeWrapper(body: ?*chip.cpBody, shape: ?*chip.cpShape, data: ?*c_void) callconv(.C) void {
+    _ = data;
     var space = chip.cpBodyGetSpace(body);
-    var success = chip.cpSpaceAddPostStepCallback(space, cullShape, shape, null);
+    _ = chip.cpSpaceAddPostStepCallback(space, cullShape, shape, null);
 }
 
 fn drawShapes(body: ?*chip.cpBody, data: ?*c_void) callconv(.C) void {
@@ -142,7 +154,7 @@ fn drawShapes(body: ?*chip.cpBody, data: ?*c_void) callconv(.C) void {
     var space = chip.cpBodyGetSpace(body);
     if (pos.y < -10 or (pos.y < (600 - 350) and look.state == 0)) {
         chip.cpBodyEachShape(body, postCullShapeWrapper, null);
-        var success = chip.cpSpaceAddPostStepCallback(space, cullBody, body, null);
+        _ = chip.cpSpaceAddPostStepCallback(space, cullBody, body, null);
     }
     var tex: *ray.Texture = @ptrCast(*ray.Texture, @alignCast(4, data));
     ray.DrawTexture(tex.*, @floatToInt(i32, pos.x), 600 - @floatToInt(i32, pos.y), look.color);
@@ -290,7 +302,7 @@ fn vis(allocator: *std.mem.Allocator) !void {
         .msgs = tractor.Messages{},
         .is_ready = false,
     };
-    var thread = try tractor.startListener(&ctx);
+    _ = try tractor.startListener(&ctx);
 
     _ = spawnNewObjects(space, rand, &looks, &ctx);
 

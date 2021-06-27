@@ -17,7 +17,7 @@ pub fn postTractor(allocator: *std.mem.Allocator, post: []const u8) !std.ArrayLi
     var tractor_url = std.os.getenv("TRACTOR_URL") orelse "http://tractor/Tractor/monitor";
 
     // global curl init, or fail
-    if (curl.curl_global_init(curl.CURL_GLOBAL_ALL) != .CURLE_OK)
+    if (curl.curl_global_init(curl.CURL_GLOBAL_ALL) != curl.CURLE_OK)
         return error.CURLGlobalInitFailed;
     defer curl.curl_global_cleanup();
 
@@ -32,20 +32,20 @@ pub fn postTractor(allocator: *std.mem.Allocator, post: []const u8) !std.ArrayLi
     errdefer response_buffer.deinit();
 
     // setup curl options
-    if (curl.curl_easy_setopt(handle, .CURLOPT_URL, tractor_url.ptr) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, curl.CURLOPT_URL, tractor_url.ptr) != curl.CURLE_OK)
         return error.CouldNotSetURL;
 
-    if (curl.curl_easy_setopt(handle, .CURLOPT_POSTFIELDS, post.ptr) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, curl.CURLOPT_POSTFIELDS, post.ptr) != curl.CURLE_OK)
         return error.CouldNotSetPost;
 
     // set write function callbacks
-    if (curl.curl_easy_setopt(handle, .CURLOPT_WRITEFUNCTION, writeToArrayListCallback) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, curl.CURLOPT_WRITEFUNCTION, writeToArrayListCallback) != curl.CURLE_OK)
         return error.CouldNotSetWriteCallback;
-    if (curl.curl_easy_setopt(handle, .CURLOPT_WRITEDATA, &response_buffer) != .CURLE_OK)
+    if (curl.curl_easy_setopt(handle, curl.CURLOPT_WRITEDATA, &response_buffer) != curl.CURLE_OK)
         return error.CouldNotSetWriteCallback;
 
     // perform
-    if (curl.curl_easy_perform(handle) != .CURLE_OK)
+    if (curl.curl_easy_perform(handle) != curl.CURLE_OK)
         return error.FailedToPerformRequest;
 
     return response_buffer;
@@ -84,7 +84,6 @@ fn parseResponse(allocator: *std.mem.Allocator, response: std.ArrayList(u8)) !?M
 
     var msgs = Messages{};
 
-    var active_commands: u32 = 0;
     for (mbox.Array.items) |item| {
         if (std.mem.eql(u8, item.Array.items[0].String, "c")) {
             if (std.mem.eql(u8, item.Array.items[4].String, "A")) msgs.active += 1;
@@ -99,11 +98,12 @@ fn parseResponse(allocator: *std.mem.Allocator, response: std.ArrayList(u8)) !?M
 }
 
 pub fn queryTractor(allocator: *std.mem.Allocator) !?Messages {
-    var buf: [64:0]u8 = undefined;
+    var buf: [128:0]u8 = undefined;
     var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&jids=0&tsid={s}", .{tractor_tsid.?});
+    //var post = try std.fmt.bufPrintZ(buf[0..], "q=subscribe&tcs=1&stats=1&jids=0&tsid={s}", .{tractor_tsid.?});
     var response = try postTractor(allocator, post);
     defer response.deinit();
-
+    //std.debug.print("\n\n{s}\n\n", .{response.items});
     return parseResponse(allocator, response);
 }
 
@@ -121,12 +121,12 @@ pub const ThreadContext = struct {
 };
 
 fn appendNum(ctx: *ThreadContext) !void {
-    var prng = std.rand.DefaultPrng.init(blk: {
-        var seed: u64 = undefined;
-        try std.os.getrandom(std.mem.asBytes(&seed));
-        break :blk 42;
-    });
-    const rand = &prng.random;
+    //var prng = std.rand.DefaultPrng.init(blk: {
+    //    var seed: u64 = undefined;
+    //    try std.os.getrandom(std.mem.asBytes(&seed));
+    //    break :blk 42;
+    //});
+    //const rand = &prng.random;
 
     while (true) {
         //var val = rand.intRangeAtMost(u32, 1, 100);
@@ -156,4 +156,14 @@ test "bit compare" {
     var a: u32 = 1;
     var b: u32 = 2;
     try std.testing.expect((a | b) == 3);
+}
+
+test "query test" {
+
+    _ = tractorLogin(std.testing.allocator) catch unreachable;
+    while (true ) {
+        _ = queryTractor(std.testing.allocator) catch unreachable;
+        std.time.sleep(1 * std.time.ns_per_s);
+    }
+    std.testing.expect(true) catch unreachable;
 }
